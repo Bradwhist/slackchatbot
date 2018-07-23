@@ -1,41 +1,33 @@
-// You can find your project ID in your Dialogflow agent settings
-const projectId = process.env.DIALOGFLOW_PROJECT_ID; //https://dialogflow.com/docs/agents#settings
-const sessionId = 'quickstart-session-id';
-const query = 'hello';
-const languageCode = 'en-US';
+const { RTMClient } = require('@slack/client');
+var express = require('express');
 
-// Instantiate a DialogFlow client.
-const dialogflow = require('dialogflow');
-const sessionClient = new dialogflow.SessionsClient();
+//initialize express
+const app = express();
 
-// Define session path
-const sessionPath = sessionClient.sessionPath(projectId, sessionId);
+//Slack
+const token = process.env.SLACK_TOKEN;
 
-// The text query request.
-const request = {
-  session: sessionPath,
-  queryInput: {
-    text: {
-      text: query,
-      languageCode: languageCode,
-    },
-  },
-};
+// The client is initialized and then started to get an active connection to the platform
+const rtm = new RTMClient(token);
+rtm.start();
 
-// Send request and log result
-sessionClient
-  .detectIntent(request)
-  .then(responses => {
-    console.log('Detected intent');
-    const result = responses[0].queryResult;
-    console.log(`  Query: ${result.queryText}`);
-    console.log(`  Response: ${result.fulfillmentText}`);
-    if (result.intent) {
-      console.log(`  Intent: ${result.intent.displayName}`);
-    } else {
-      console.log(`  No intent matched.`);
-    }
+// This argument can be a channel ID, a DM ID, a MPDM ID, or a group ID
+// See the "Combining with the WebClient" topic below for an example of how to get this ID
+const conversationId = 'C1232456';
+
+// The RTM client can send simple string messages
+rtm.sendMessage('Hello there', conversationId)
+  .then((res) => {
+    // `res` contains information about the posted message
+    console.log('Message sent: ', res.ts);
   })
-  .catch(err => {
-    console.error('ERROR:', err);
-  });
+  .catch(console.error);
+
+
+
+
+app.get('/', (req,res)=>res.send('Hello World'))
+app.post('/hey', (req,res)=>res.send('Hey'))
+
+
+app.listen(7777, () => console.log('Example app listening on port 7777!'))
