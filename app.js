@@ -1,7 +1,5 @@
 const { RTMClient } = require('@slack/client');
-
 const express = require('express')
-
 //initialize express
 const app = express();
 

@@ -1,3 +1,7 @@
 node_modules
 package-lock.json
 env.sh
+.babelrc
+credentials.json
+slackbot-211121-3ce8360d3f6d.json
+token.json
