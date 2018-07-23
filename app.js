@@ -1,5 +1,6 @@
 const { RTMClient } = require('@slack/client');
 
+const express = require('express')
 
 //initialize express
 const app = express();
@@ -9,19 +10,39 @@ const token = process.env.SLACK_TOKEN;
 
 // The client is initialized and then started to get an active connection to the platform
 const rtm = new RTMClient(token);
+
+
+
+rtm.on('message', event=>{
+    const conversationId = event.channel;
+
+    //   Skip messages that are from a bot or my own user ID
+  if ( (event.subtype && event.subtype === 'bot_event') ||
+  (!event.subtype && event.user === rtm.activeUserId) ) {
+return;
+}
+
+
+//     rtm.sendMessage('Hello there', conversationId)
+//   .then((res) => {
+//     // `res` contains information about the posted message
+    
+//   })
+
+
+})
+
 rtm.start();
 
-// This argument can be a channel ID, a DM ID, a MPDM ID, or a group ID
-// See the "Combining with the WebClient" topic below for an example of how to get this ID
-const conversationId = 'C1232456';
 
-// The RTM client can send simple string messages
-rtm.sendMessage('Hello there', conversationId)
-  .then((res) => {
-    // `res` contains information about the posted message
-    console.log('Message sent: ', res.ts);
-  })
-  .catch(console.error);
+
+// // The RTM client can send simple string messages
+// rtm.sendMessage('Hello there', conversationId)
+//   .then((res) => {
+//     // `res` contains information about the posted message
+//     console.log('Message sent: ', res.ts);
+//   })
+//   .catch(console.error);
 
 
 
