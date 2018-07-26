@@ -13,9 +13,6 @@ var UserSchema =  new Schema(
     token: {
       type: 'object',
     },
-    refresh_token: {
-      type: 'string',
-    },
     name: {
       type: 'string',
     },
