@@ -14,11 +14,14 @@ const sessionClient = new dialogflow.SessionsClient();
 const sessionPath = sessionClient.sessionPath(projectId, sessionId);
 const axios = require('axios');
 const mongoose = require('mongoose');
+const moment = require('moment');
 
 mongoose.connect(process.env.MONGODB_URI);
 var Models = require('./models');
 var User = Models.User;
 var Doc = Models.Doc;
+var Reminder = Models.Reminder;
+var Meeting = Models.Meeting;
 
 //oAuth2Client
 const oauth2Client = new google.auth.OAuth2(
@@ -27,19 +30,9 @@ const oauth2Client = new google.auth.OAuth2(
   process.env.REDIRECT_URL
 )
 
-// const {tokens} = await oauth2Client.getToken(code)
-// oauth2Client.setCredentials(tokens);
 
-
-// console.log('open URI:', oauth2Client.generateAuthUrl({
-//   access_type: 'SLACK-ID',
-//   state: 'slack id',
-//   scope: [
-//     'https://www.googleapis.com/auth/calendar',
-//   ]
-// }))
-
-//API Create Calendar event
+///////////////////////////////
+//API Get top 10 Calendar event
 function makeCalendarAPICall(token) {
   const oauth2Client = new google.auth.OAuth2(
     process.env.CLIENT_ID,
@@ -58,6 +51,8 @@ function makeCalendarAPICall(token) {
   });
 
   const calendar = google.calendar({version: 'v3', auth: oauth2Client});
+  const gmail = google.gmail({version: 'v1', auth: oauth2Client});
+
   calendar.events.list({
   calendarId: 'primary', // Go to setting on your calendar to get Id
   timeMin: (new Date()).toISOString(),
@@ -79,13 +74,124 @@ function makeCalendarAPICall(token) {
   }
 });
 }
+///////////////////////////////////////////////////////////////////
+//Post Event
+function postReminderCalendarAPI(token, date, subject) {
+  date = date.substring(0, 10);
+  console.log('passed in date', date);
+  var startDate = moment(date).format("YYYY-MM-DD");
+  var endDate = moment(startDate).add(1, 'd').format("YYYY-MM-DD");
+  var obj = {
+    'summary': subject,
+    'end': {
+      'date': endDate,
+    },
+    'start': {
+      'date': startDate,
+    }
+  }
+  var calendarObj = {
+    'calendarId': 'primary',
+    'resource': obj,
+  }
+  console.log('s', startDate, 'e', endDate);
 
-// makeCalendarAPICall({
-//   access_token: '',
-//   token_type: 'Bearer',
-//   refresh_token: '',
-//   expiry_date: 1530585071407
-// })
+
+
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.CLIENT_ID,
+    process.env.CLIENT_SECRET,
+    process.env.REDIRECT_URL
+  )
+
+  oauth2Client.setCredentials(token)
+
+  oauth2Client.on('tokens', (tokens) => {
+    if (tokens.refresh_token) {
+      // store the refresh_token in my database!
+      console.log(tokens.refresh_token);
+    }
+    console.log(tokens.access_token);
+  });
+
+  const calendar = google.calendar({version: 'v3', auth: oauth2Client});
+  const gmail = google.gmail({version: 'v1', auth: oauth2Client});
+  calendar.events.insert(calendarObj, (err, resp) => {
+  if (err) return console.log('The API returned an error: ' + err + startDate + endDate);
+  console.log(resp);
+
+});
+}
+///////////////////////////////////////////////////////////////POST Meeting
+async function postMeetingCalendarAPI(token, subject, dateTime, invitees) {
+  try {
+    console.log('logging postMeetingCalenderAPI dateTime', dateTime);
+  var startDateTime = dateTime;
+  var endDateTime = moment(dateTime).add(30, 'minutes');
+  var attendees = [];
+
+  for (var i = 0; i < invitees.length; i ++) {
+    var user = await User.findOne({altNames: { $all: [ invitees[i].stringValue ] }})
+
+      if(!user) {
+        console.log('no user found');
+      } else {
+        attendees.push({displayName: user.name, email: user.email})
+      }
+
+  }
+  var obj = {
+    'summary': subject,
+    'end': {
+      'dateTime': endDateTime,
+    },
+    'start': {
+      'dateTime': startDateTime,
+    },
+    'attendees': attendees,
+  }
+  var calendarObj = {
+    'calendarId': 'primary',
+    'resource': obj,
+  }
+  console.log('s', startDateTime, 'e', endDateTime);
+  // var subDate = date.substring(0, 10);
+  // console.log(new Date(subDate));
+  // var endDate = new Date(subDate);
+  // endDate.setDate(endDate.getDate() + 1);
+  // endDate = new Date(endDate);
+  // endDate = endDate.toString().substring(0, 10);
+
+
+
+  const oauth2Client = new google.auth.OAuth2(
+    process.env.CLIENT_ID,
+    process.env.CLIENT_SECRET,
+    process.env.REDIRECT_URL
+  )
+
+  oauth2Client.setCredentials(token)
+
+  oauth2Client.on('tokens', (tokens) => {
+    if (tokens.refresh_token) {
+      // store the refresh_token in my database!
+      console.log(tokens.refresh_token);
+    }
+    console.log(tokens.access_token);
+  });
+
+  const calendar = google.calendar({version: 'v3', auth: oauth2Client});
+  calendar.events.insert(calendarObj, (err, resp) => {
+  if (err) return console.log('The API returned an error: ' + err);
+  console.log(resp);
+
+});
+}
+catch (err){console.log(err)}
+}
+///////////////////////////////////////////////////////////////////////////
+
 //Slack
 const token = process.env.SLACK_TOKEN;
 
@@ -125,8 +231,27 @@ sessionClient
   // console.log(response[0].queryResult.fulfillmentText);
   // console.log(response[0]);
 
+      console.log('QUERY RESULT', response[0]);
+  if (response[0].queryResult.intent.displayName === "createReminder" && response[0].queryResult.allRequiredParamsPresent) {
+    var paramFields = response[0].queryResult.parameters.fields;
+    console.log('paramFields', paramFields);
+
+    var newReminder = new Reminder({
+      subject: paramFields.Subject.stringValue,
+      date: paramFields.date.stringValue,
+      user: event.user,
+    })
+    newReminder.save()
+    .then(response => {
+      console.log('newReminder saved', response);
+    })
+    .catch(err => console.log(err))
+  }
   if (response[0].queryResult.intent.displayName === "createReminderYes") {
     var intentParams = response[0].queryResult.parameters.fields;
+
+
+
     User.findOne({slackId: event.user})
     .then(user => {
       console.log(user);
@@ -137,42 +262,80 @@ sessionClient
       state: event.user,
       scope: [
         'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/gmail.readonly',
       ]
     })
     rtm.sendMessage(linkUrl, conversationId);
   } else {
-    makeCalendarAPICall(user.token);
+    var eventDate = '';
+    var eventSubject = '';
+    Reminder.findOneAndDelete({user: event.user})
+    .then(reminder => {
+      eventDate = reminder.date;
+      eventSubject = reminder.subject;
+
+      postReminderCalendarAPI(user.token, eventDate, eventSubject);
+    })
+    .catch(err => console.log(err))
+
   }
 })
 .catch(err => console.log(err))
-    //  console.log(intentParams);
-      //rtm.sendMessage('Reminder made', conversationId)
-      ///////////////////////////
-      // calendar.events.insert({
-      //   calendarId: 'primary', // Go to setting on your calendar to get Id
-      //   'resource': {
-      //     'summary': 'Google I/O 2015',
-      //     'location': '800 Howard St., San Francisco, CA 94103',
-      //     'description': 'A chance to hear more about Google\'s developer products.',
-      //     'start': {
-      //       'dateTime': '2018-07-04T02:00:35.462Z',
-      //       'timeZone': 'America/Los_Angeles'
-      //     },
-      //     'end': {
-      //       'dateTime': '2018-07-04T02:10:35.462Z',
-      //       'timeZone': 'America/Los_Angeles'
-      //     },
-      //     'attendees': [
-      //       // {'email': 'lpage@example.com'},
-      //       // {'email': 'sbrin@example.com'}
-      //     ]
-      //   }
-      // }, (err, {data}) => {
-      //   if (err) return console.log('The API returned an error: ' + err);
-      //   console.log(data)
-      // })
-      ///////////////////////////
+
   }
+  ////////////////And now meetings
+  if (response[0].queryResult.intent.displayName === "createMeeting" && response[0].queryResult.allRequiredParamsPresent) {
+    var paramFields = response[0].queryResult.parameters.fields;
+    console.log('PARAMFIELDSSSSS', paramFields);
+    var dateTime = paramFields.date.stringValue.substring(0, 10) + paramFields.time.stringValue.substring(10, 25);
+    console.log('DATETIMEEEEEE', dateTime);
+    var newMeeting = new Meeting({
+      subject: paramFields.Subject.stringValue,
+      invitees: paramFields.Invitees.listValue.values,
+      dateTime: dateTime,
+      user: event.user,
+
+    })
+    newMeeting.save()
+    .then(meeting => {
+      console.log('newMeeting saved', meeting);
+    })
+    .catch(err => console.log(err))
+  }
+
+  if(response[0].queryResult.intent.displayName === "createMeetingYes") {
+    User.findOne({slackId: event.user})
+    .then(user => {
+      console.log(user);
+      if (!user) {
+
+        var linkUrl = oauth2Client.generateAuthUrl({
+          access_type: 'offline',
+          state: event.user,
+          scope: [
+            'https://www.googleapis.com/auth/calendar',
+            'https://www.googleapis.com/auth/gmail.readonly'
+          ]
+        })
+        rtm.sendMessage(linkUrl, conversationId);
+      } else {
+        var eventDate = '';
+        var eventSubject = '';
+        Meeting.findOneAndDelete({user: event.user})
+        .then(meeting => {
+          console.log('meeting in findOneAndDelete', meeting)
+          subject = meeting.subject;
+          dateTime = meeting.dateTime;
+          invitees = meeting.invitees;
+          postMeetingCalendarAPI(user.token, subject, dateTime, invitees);
+        })
+        .catch(err => console.log(err))
+
+      }
+    })
+    .catch(err => console.log(err))
+  }
+  ///////////////////////////////
     //var intentParams = response[0].queryResult.parameters.fields;
     //retTestMessage = '  Task:    ' + response[0].queryResult.parameters.fields.Task.stringValue + '  Subject:   ' + response[0].queryResult.parameters.fields.Subject.stringValue + '  Date:    ' + response[0].queryResult.parameters.fields.Date.stringValue;
 
@@ -185,22 +348,65 @@ sessionClient
 
 rtm.start();
 /// Google OAuth2 callback_id
-app.get(process.env.REDIRECT_URL.replace(/https?:\/\/.+\//, '/'), (req, res) => {
-  oauth2Client.getToken(req.query.code, function (err, token) {
+app.get(process.env.REDIRECT_URL.replace(/https?:\/\/.+\//, '/'), async (req, res) => {
+  oauth2Client.getToken(req.query.code, async function (err, token) {
     if (err) return console.error(err.message)
       oauth2Client.setCredentials(token)
       console.log('XXXXXXXXXXXXXXXXXXXXXX');
+      const gmail = google.gmail({version: 'v1', auth: oauth2Client});
+      let profileInfo = await new Promise((resolve, reject) => {
+        gmail.users.getProfile({
+        userId: 'me',
+      }, (err, res) => {
+        if (err) reject(err)
+        console.log('result of profile', res);
+        resolve(res.data);
+      })
+    })
     //console.log('token', token, 'req.query:', req.query) // req.query.state <- meta-data
-    var newUser = new Models.User({
+
+    var responseReminder = await Reminder.findOneAndDelete({user: req.query.state})
+    console.log(responseReminder);
+    if (responseReminder) {
+    var reminderSubject = responseReminder.subject;
+    var reminderDate = responseReminder.dateTime;
+    var userName = await web.users.info({
+       'user': req.query.state,
+      });
+    console.log('USERNAME LOGGGGGGED', userName);
+    var newUser = new User({
       slackId: req.query.state,
       token: token,
+      name: userName.user.real_name,
+      email: profileInfo.emailAddress,
     })
     newUser.save()
     .then(response => {
-      makeCalendarAPICall(response.token);
-      User.find()
-      .then(users => console.log(users))
+      postReminderCalendarAPI(response.token, reminderDate, reminderSubject);
     })
+    .catch(err => console.log(err))
+  } else {
+    var responseMeeting = await Meeting.findOneAndDelete({user: req.query.state})
+    var meetingSubject = responseMeeting.subject;
+    var meetingDateTime = responseMeeting.dateTime;
+    var meetingInvitees = responseMeeting.invitees;
+    var userName = await web.users.info({
+       'user': req.query.state,
+      });
+    var newUser = new User({
+      slackId: req.query.state,
+      token: token,
+      name: userName.user.real_name,
+      altNames: userName.user.real_name.split(' '),
+      email: profileInfo.emailAddress,
+    })
+    newUser.save()
+    .then(response => {
+      postMeetingCalendarAPI(response.token, meetingSubject, meetingDateTime, meetingInvitees);
+    })
+    .catch(err => console.log(err))
+  }
+
     res.send('ok')
   })
 })
@@ -210,227 +416,3 @@ app.post('/hey', (req,res)=>res.send('Hey'))
 
 
 app.listen(1337, () => console.log('Example app listening on port 7777!'))
-       // web.chat.postMessage({
-       //   'channel': event.channel,
-       //   'as_user': true,
-       //   'text': 'I would like to offer a banana',
-       //   'attachments': [
-       //     {
-       //       'text': 'Do you accept?',
-       //       'fallback': 'You did not accept :(',
-       //       'callback_id': 'banana',
-       //       'color': '#3AA3E3',
-       //       'attachment_type': 'default',
-       //       'actions': [
-       //         {
-       //           'name': 'option',
-       //           'text': 'Yes',
-       //           'type': 'button'
-       //         },
-       //         {
-       //           'name': 'option',
-       //           'text': 'No',
-       //           'type': 'button'
-       //         }
-       //       ]
-       //     }
-       //   ]
-       // })
-
-     //rtm.sendMessage(retTestMessage, conversationId);
-
-    //  console.log('intent', response[0].queryResult.parameters.fields.Date);
-
-     // axios({
-     //   method: 'post',
-     //   url: 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
-     //   data: {
-     //     attachments: {
-     //       fileUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/db/Alpaca_%2831562329701%29.jpg/1200px-Alpaca_%2831562329701%29.jpg',
-     //     },
-     //
-     //     end: {},
-     //
-     //
-     //     start: {},
-     //     description: event.text,
-     //
-     //   }
-     // })
-     // .then (response2 => console.log('RESPONSE2'))
-     // .catch(err => console.log('ERR'))
-
-
-
-
-
-
-
-
-
-//     rtm.sendMessage('Hello there', conversationId)
-//   .then((res) => {
-//     // `res` contains information about the posted message
-
-//   })
-
-
-
-
-
-
-
-
-// // The RTM client can send simple string messages
-// rtm.sendMessage('Hello there', conversationId)
-//   .then((res) => {
-//     // `res` contains information about the posted message
-//     console.log('Message sent: ', res.ts);
-//   })
-//   .catch(console.error);
-
-
-
-
-
-
-
-// const projectId = process.env.DIALOGFLOW_PROJECT_ID; //https://dialogflow.com/docs/agents#settings
-// const sessionId = 'quickstart-session-id';
-// const query = 'hello';
-// const languageCode = 'en-US';
-//
-// // Instantiate a DialogFlow client.
-// const dialogflow = require('dialogflow');
-// const sessionClient = new dialogflow.SessionsClient();
-//
-// // Define session path
-// const sessionPath = sessionClient.sessionPath(projectId, sessionId);
-//
-// // The text query request.
-// const request = {
-//   session: sessionPath,
-//   queryInput: {
-//     text: {
-//       text: query,
-//       languageCode: languageCode,
-//     },
-//   },
-// };
-//
-// // Send request and log result
-// sessionClient
-//   .detectIntent(request)
-//   .then(responses => {
-//     console.log('Detected intent');
-//     const result = responses[0].queryResult;
-//     console.log(`  Query: ${result.queryText}`);
-//     console.log(`  Response: ${result.fulfillmentText}`);
-//     if (result.intent) {
-//       console.log(`  Intent: ${result.intent.displayName}`);
-//     } else {
-//       console.log(`  No intent matched.`);
-//     }
-//   })
-//   .catch(err => {
-//     console.error('ERROR:', err);
-//   });
-//////////////////////////////////////////////////////////////////////////////////
-// import {RTMClient, WebClient} from '@slack/client'
-// import {dialogFlow} from './dialogFlow.js'
-// var app = require('express')()
-// var bodyparser = require('body-parser')
-//
-// const token = 'xoxb-402864850977-402868052193-GCD3YfYvIn8ZRTLTfW8o8fWS'
-// const web = new WebClient(token)
-// const rtm = new RTMClient(token)
-// rtm.start()
-// rtm.on('message', function (event) {
-//   console.log(event)
-//   if (event.bot_id === 'BBWMVV3FG') return
-//   web.chat.postMessage({
-//     'channel': event.channel,
-//     'as_user': true,
-//     'text': 'I would like to offer a banana',
-//     'attachments': [
-//       {
-//         'text': 'Do you accept?',
-//         'fallback': 'You did not accept :(',
-//         'callback_id': 'banana',
-//         'color': '#3AA3E3',
-//         'attachment_type': 'default',
-//         'actions': [
-//           {
-//             'name': 'option',
-//             'text': 'Yes',
-//             'type': 'button'
-//           },
-//           {
-//             'name': 'option',
-//             'text': 'No',
-//             'type': 'button'
-//           }
-//         ]
-//       }
-//     ]
-//   })
-// })
-//
-// app.post('/scheduler', function (req, res) {
-//   console.log('fooooo', req.body)
-//   res.send('ok')
-// })
-//
-// app.listen(1337, () => {
-//   console.log(`Server is running on port ${app.get('port')}`)
-// })
-
-
-
-
-
-// web.chat.postMessage({
-//   'channel': event.channel,
-//   'as_user': true,
-//   'text': 'Confirm Reminder:',
-//   'attachments': [
-//     {
-//       'text': intentParams.Subject.stringValue,
-//       'fallback': 'You did not accept :(',
-//       'callback_id': 'banana',
-//       'color': '#3AA3E3',
-//       'attachment_type': 'default',
-//       'actions': [
-//         {
-//           'name': 'option',
-//           'text': 'Correct',
-//           'type': 'button'
-//         },
-//         {
-//           'name': 'option',
-//           'text': 'Not Correct',
-//           'type': 'button'
-//         }
-//       ]
-//     },
-//     {
-//       'text': intentParams.date.stringValue,
-//       'fallback': 'You did not accept :(',
-//       'callback_id': 'banana',
-//       'color': '#3AA3E3',
-//       'attachment_type': 'default',
-//       'actions': [
-//         {
-//           'name': 'option',
-//           'text': 'Correct',
-//           'type': 'button'
-//         },
-//         {
-//           'name': 'option',
-//           'text': 'Not Correct',
-//           'type': 'button'
-//         }
-//       ]
-//     }
-//   ]
-// })

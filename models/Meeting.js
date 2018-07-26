@@ -1,36 +1,27 @@
 var mongoose = require("mongoose");
 
-
-
 var Schema = mongoose.Schema
 var ObjectId = Schema.ObjectId
 
-var UserSchema =  new Schema(
+var MeetingSchema =  new Schema(
   {
-    slackId: {
+    user: {
       type: 'string',
     },
-    token: {
-      type: 'object',
-    },
-    refresh_token: {
+    subject: {
       type: 'string',
     },
-    name: {
+    dateTime: {
       type: 'string',
+      required: true,
     },
-    altNames: {
+    invitees: {
       type: 'array',
-    },
-    email: {
-      type: 'string'
-    },
+    }
     // email: {
     //   type: String,
     //
     // },
-
-
   });
 
-  module.exports = mongoose.model('User', UserSchema);
+  module.exports = mongoose.model('Meeting', MeetingSchema);
