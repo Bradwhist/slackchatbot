@@ -15,6 +15,11 @@ const sessionPath = sessionClient.sessionPath(projectId, sessionId);
 const axios = require('axios');
 const mongoose = require('mongoose');
 const moment = require('moment');
+// parse application/x-www-form-urlencoded
+app.use(bodyParser.urlencoded({ extended: false }))
+
+// parse application/json
+app.use(bodyParser.json())
 
 mongoose.connect(process.env.MONGODB_URI);
 var Models = require('./models');
@@ -427,7 +432,7 @@ rtm.on('message', event=>{
 
 
 
-          Meeting.findOneAndDelete({user: event.user})
+          Meeting.findOne({user: event.user})
           .then(meeting => {
             console.log('meeting in findOneAndDelete', meeting)
             var subject = meeting.subject;
@@ -453,6 +458,10 @@ rtm.on('message', event=>{
                 }
                 //
                 if (conflictCount === 0) {
+                  // REMOVE HERE
+                  Meeting.findOneAndDelete({user: event.user})
+                  .then(resp => console.log(resp))
+                  .catch(err => console.log(err))
                   postMeetingCalendarAPI(user.token, subject, dateTime, invitees);
                 } else {
                   console.log('invitee has a conflict BRUH');
@@ -460,7 +469,36 @@ rtm.on('message', event=>{
                 }
               } else {
                 console.log('conflict found, meeting not posted');
-                rtm.sendMessage('You are already busy on party business at ' + dateTime + '  try  ' + conflict.nextOpen + '  or  ' + conflict.prevOpen, conversationId);
+                //rtm.sendMessage('You are already busy on party business at ' + dateTime + '  try  ' + conflict.nextOpen + '  or  ' + conflict.prevOpen, conversationId);
+                web.chat.postMessage({
+                  'type': "interactive_message",
+                    'channel': conversationId,
+                    'as_user': true,
+                    'text': 'You are busy this time, try another time',
+                    'attachments': [
+                      {
+                        'text': 'Available times',
+                        'fallback': 'You did not accept :(',
+                        'callback_id': 'banana',
+                        'color': '#3AA3E3',
+                        'attachment_type': 'button',
+                        'actions': [
+                          {
+                            'name': 'option1',
+                            'text': conflict.nextOpen,
+                            'type': 'button',
+                            'value': JSON.stringify({newOpenTime: conflict.nextOpen}),
+                          },
+                          {
+                            'name': 'option2',
+                            'text': conflict.prevOpen,
+                            'type': 'button',
+                            'value': JSON.stringify({newOpenTime: conflict.prevOpen}),
+                          }
+                        ]
+                      }
+                    ]
+                })
               };
             }
             catch (err){console.log(err)};
@@ -528,6 +566,7 @@ app.get(process.env.REDIRECT_URL.replace(/https?:\/\/.+\//, '/'), async (req, re
     var meetingSubject = responseMeeting.subject;
     var meetingDateTime = responseMeeting.dateTime;
     var meetingInvitees = responseMeeting.invitees;
+    var conflictCount = 0;
     var userName = await web.users.info({
        'user': req.query.state,
       });
@@ -540,7 +579,73 @@ app.get(process.env.REDIRECT_URL.replace(/https?:\/\/.+\//, '/'), async (req, re
     })
     newUser.save()
     .then(response => {
-      postMeetingCalendarAPI(response.token, meetingSubject, meetingDateTime, meetingInvitees);
+
+      meetingCheckConflicts(response.token, meetingDateTime, async conflict => {
+        try {
+        if (!conflict.conflict) {
+          //checks for invitee conflicts
+          for (var i = 0; i < meetingInvitees.length; i ++) {
+            var invitedUser = await User.findOne({altNames: { $all: [ meetingInvitees[i].stringValue ] }})
+            console.log('invitedUser', invitedUser);
+            if (invitedUser) {
+            meetingCheckConflicts(invitedUser.token, meetingDateTime, conflict => {
+              if (conflict) {
+                conflictCount++;
+              }
+            })
+          }
+          }
+          //
+          if (conflictCount === 0) {
+            // REMOVE HERE
+            // Meeting.findOneAndDelete({user: event.user})
+            // .then(resp => console.log(resp))
+            // .catch(err => console.log(err))
+            postMeetingCalendarAPI(response.token, meetingSubject, meetingDateTime, meetingInvitees);
+          } else {
+            console.log('invitee has a conflict BRUH');
+            rtm.sendMessage('One of your comrades is already occupied with party business at ' + dateTime + 'try' + conflict.nextOpen, conversationId);
+          }
+        } else {
+          console.log('conflict found, meeting not posted');
+          //rtm.sendMessage('You are already busy on party business at ' + dateTime + '  try  ' + conflict.nextOpen + '  or  ' + conflict.prevOpen, conversationId);
+          web.chat.postMessage({
+            'type': "interactive_message",
+              'channel': conversationId,
+              'as_user': true,
+              'text': 'You are busy this time, try another time',
+              'attachments': [
+                {
+                  'text': 'Available times',
+                  'fallback': 'You did not accept :(',
+                  'callback_id': 'banana',
+                  'color': '#3AA3E3',
+                  'attachment_type': 'button',
+                  'actions': [
+                    {
+                      'name': 'option1',
+                      'text': conflict.nextOpen,
+                      'type': 'button',
+                      'value': JSON.stringify({newOpenTime: conflict.nextOpen}),
+                    },
+                    {
+                      'name': 'option2',
+                      'text': conflict.prevOpen,
+                      'type': 'button',
+                      'value': JSON.stringify({newOpenTime: conflict.prevOpen}),
+                    }
+                  ]
+                }
+              ]
+          })
+        };
+      }
+      catch (err){console.log(err)};
+      });
+
+
+
+
     })
     .catch(err => console.log(err))
   }
@@ -549,8 +654,47 @@ app.get(process.env.REDIRECT_URL.replace(/https?:\/\/.+\//, '/'), async (req, re
   })
 })
 /////////////////////////////
+//Routes
+app.post('/slack', (req,res)=> {
+  console.log('in slack route', JSON.parse(JSON.parse(req.body.payload).actions[0].value).newOpenTime);
+  console.log('userid', JSON.parse(req.body.payload).user.id);
+  var newStartDate = JSON.parse(JSON.parse(req.body.payload).actions[0].value).newOpenTime;
+  User.findOne({slackId: JSON.parse(req.body.payload).user.id})
+  .then(user => {
+    console.log(user);
+    if (!user) {
+
+      var linkUrl = oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        state: user.slackId,
+        scope: [
+          'https://www.googleapis.com/auth/calendar',
+          'https://www.googleapis.com/auth/gmail.readonly'
+        ]
+      })
+      rtm.sendMessage(linkUrl, conversationId);
+    } else {
+      var eventDate = '';
+      var eventSubject = '';
+
+
+
+      Meeting.findOneAndDelete({user: JSON.parse(req.body.payload).user.id})
+      .then(meeting => {
+        console.log('meeting in findOneAndDelete', meeting)
+        var subject = meeting.subject;
+        var dateTime = meeting.dateTime;
+        var invitees = meeting.invitees;
+      postMeetingCalendarAPI(user.token, subject, newStartDate, invitees);
+    })
+      .catch(err => console.log(err))
+    }
+  })
+  .catch(err => console.log(err))
+})
+/////////////////////////////
 //app.get('/', (req,res)=>res.send('Hello World'))
 app.post('/hey', (req,res)=>res.send('Hey'))
 
 
-app.listen(1337, () => console.log('Example app listening on port 7777!'))
+app.listen(1337, () => console.log('Example app listening on port 1337!'))
